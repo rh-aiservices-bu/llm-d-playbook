@@ -36,6 +36,57 @@ oc describe node <gpu-node> | grep -A5 "Allocatable:"
 oc get pods -n nvidia-gpu-operator
 ```
 
+## Install Required Operators
+
+If operators are missing, install them from the included `gitops/operators/` directory.
+
+### Install Order
+
+Install operators in this order to satisfy dependencies:
+
+```bash
+# From the playbook directory
+cd "llm-d playbook"
+
+# 1. Cert Manager
+oc apply -k gitops/operators/cert-manager
+oc wait --for=condition=ready pod -l app.kubernetes.io/name=cert-manager -n cert-manager --timeout=300s
+
+# 2. MetalLB (bare metal only - skip for cloud)
+oc apply -k gitops/operators/metallb-operator
+oc wait --for=condition=ready pod -l control-plane=controller-manager -n metallb-system --timeout=300s
+
+# 3. Service Mesh 3
+oc apply -k gitops/operators/servicemeshoperator3
+# Wait for operator to install (check CSV status)
+oc get csv -n openshift-operators -w
+
+# 4. Red Hat OpenShift AI
+oc apply -k gitops/operators/rhoai
+oc get csv -n redhat-ods-operator -w
+
+# 5. Node Feature Discovery (if not already installed)
+# NFD is typically installed via OperatorHub
+
+# 6. NVIDIA GPU Operator (if not already installed)
+# GPU Operator is typically installed via OperatorHub
+
+# 7. Leader Worker Set (optional - only for MoE models)
+oc apply -k gitops/operators/leader-worker-set
+```
+
+### Quick Install (OCP 4.19)
+
+For a quick install of all prerequisites on OCP 4.19:
+
+```bash
+# Install all OCP 4.19 prerequisites at once
+until oc apply -k gitops/ocp-4.19; do : ; done
+
+# Watch operator installation progress
+oc get csv -A -w
+```
+
 ## Required Operators Checklist
 
 Run this script to check all required operators:
@@ -61,10 +112,6 @@ oc get csv -A | grep -q "connectivity-link\|kuadrant" && echo "OK" || echo "NOT 
 echo -n "OpenShift AI: "
 oc get csv -n redhat-ods-operator | grep -q "rhods\|openshift-ai" && echo "OK" || echo "MISSING"
 
-# Check MetalLB (bare metal only)
-echo -n "MetalLB (bare metal): "
-oc get csv -n metallb-system 2>/dev/null | grep -q "metallb" && echo "OK" || echo "NOT FOUND (cloud environments skip)"
-
 # Check NFD
 echo -n "Node Feature Discovery: "
 oc get csv -A | grep -q "nfd" && echo "OK" || echo "MISSING"
@@ -73,6 +120,37 @@ oc get csv -A | grep -q "nfd" && echo "OK" || echo "MISSING"
 echo -n "NVIDIA GPU Operator: "
 oc get csv -n nvidia-gpu-operator | grep -q "gpu-operator" && echo "OK" || echo "MISSING"
 ```
+
+## Bare Metal Validation (Optional)
+
+Skip this section if deploying on cloud infrastructure (AWS, Azure, GCP, etc.).
+
+### MetalLB Operator
+
+Bare metal deployments require MetalLB for LoadBalancer service support:
+
+```bash
+# Check MetalLB operator
+echo -n "MetalLB: "
+oc get csv -n metallb-system 2>/dev/null | grep -q "metallb" && echo "OK" || echo "NOT FOUND"
+
+# Check MetalLB pods
+oc get pods -n metallb-system
+```
+
+### MetalLB Configuration
+
+Verify MetalLB is configured with an IP address pool:
+
+```bash
+# Check IPAddressPool
+oc get ipaddresspools -n metallb-system
+
+# Check L2Advertisement
+oc get l2advertisements -n metallb-system
+```
+
+If MetalLB is not configured, see [Advanced Deployment](03-advanced-deployment.md) for setup instructions.
 
 ## Gateway API Validation
 
