@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: qwen-vllm-monitor
+spec:
+  selector:
+    matchLabels:
+      serving.kserve.io/inferenceservice: qwen-vllm
+  podMetricsEndpoints:
+    - port: "8000"
+      path: /metrics
+      interval: 30s
+  namespaceSelector:
+    matchNames:
+      - demo-llm
