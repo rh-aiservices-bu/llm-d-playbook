@@ -2,6 +2,15 @@
 
 This guide helps you verify that your OpenShift cluster meets all prerequisites for LLM-D deployment.
 
+## GPU Operator Prerequisites
+
+Before proceeding, ensure the following operators are installed on your cluster:
+
+- **Node Feature Discovery (NFD)** - Labels nodes with hardware capabilities
+- **NVIDIA GPU Operator** - Manages GPU drivers and device plugins
+
+These operators are typically installed via OperatorHub and must be functioning before LLM-D deployment. The GPU Availability checks below will fail if these are not installed.
+
 ## Cluster Requirements
 
 ### OpenShift Version
@@ -34,6 +43,17 @@ oc describe node <gpu-node> | grep -A5 "Allocatable:"
 
 # Check NVIDIA GPU Operator status
 oc get pods -n nvidia-gpu-operator
+
+# Expected output (all pods should be Running or Completed):
+# NAME                                                  READY   STATUS      AGE
+# gpu-feature-discovery-xxxxx                           1/1     Running     ...
+# gpu-operator-xxxxxxx-xxxxx                            1/1     Running     ...
+# nvidia-container-toolkit-daemonset-xxxxx              1/1     Running     ...
+# nvidia-cuda-validator-xxxxx                           0/1     Completed   ...
+# nvidia-dcgm-exporter-xxxxx                            1/1     Running     ...
+# nvidia-device-plugin-daemonset-xxxxx                  1/1     Running     ...
+# nvidia-driver-daemonset-xxxxx                         1/1     Running     ...
+# nvidia-operator-validator-xxxxx                       1/1     Running     ...
 ```
 
 ## Install Required Operators
@@ -45,8 +65,6 @@ If operators are missing, install them from the included `gitops/operators/` dir
 Install operators in this order to satisfy dependencies:
 
 ```bash
-# From the playbook directory
-cd "llm-d playbook"
 
 # 1. Cert Manager
 oc apply -k gitops/operators/cert-manager
@@ -57,21 +75,41 @@ oc apply -k gitops/operators/metallb-operator
 oc wait --for=condition=ready pod -l control-plane=controller-manager -n metallb-system --timeout=300s
 
 # 3. Service Mesh 3
-oc apply -k gitops/operators/servicemeshoperator3
+oc apply -k gitops/operators/servicemeshoperator3/operator/overlays/stable
 # Wait for operator to install (check CSV status)
 oc get csv -n openshift-operators -w
 
-# 4. Red Hat OpenShift AI
+# 4. Connectivity Link (required for RHOAI 3.0+)
+oc apply -k gitops/operators/connectivity-link
+# Note: InstallPlan may require manual approval due to dependencies
+# Check and approve if needed:
+oc get installplan -n openshift-operators | grep -i "requiresapproval"
+# If an InstallPlan is pending, approve it:
+# oc patch installplan <name> -n openshift-operators --type merge -p '{"spec":{"approved":true}}'
+# Wait for operators to install
+oc get csv -n openshift-operators -w | grep -E "rhcl|authorino|limitador"
+# Wait for AuthPolicy CRD to be available
+oc wait --for=condition=Established crd/authpolicies.kuadrant.io --timeout=300s
+
+# 5. Red Hat OpenShift AI
 oc apply -k gitops/operators/rhoai
 oc get csv -n redhat-ods-operator -w
 
-# 5. Node Feature Discovery (if not already installed)
+# 6. Configure OpenShift AI (DSCInitialization and DataScienceCluster)
+oc apply -k gitops/instance/rhoai
+# Wait for LLMInferenceService CRD to be created
+oc wait --for=condition=Established crd/llminferenceservices.serving.kserve.io --timeout=300s
+# Wait for controller pods to be ready (required for webhook validation)
+oc wait --for=condition=ready pod -l control-plane=odh-model-controller -n redhat-ods-applications --timeout=300s
+oc wait --for=condition=ready pod -l control-plane=kserve-controller-manager -n redhat-ods-applications --timeout=300s
+
+# 7. Node Feature Discovery (if not already installed)
 # NFD is typically installed via OperatorHub
 
-# 6. NVIDIA GPU Operator (if not already installed)
+# 8. NVIDIA GPU Operator (if not already installed)
 # GPU Operator is typically installed via OperatorHub
 
-# 7. Leader Worker Set (optional - only for MoE models)
+# 9. Leader Worker Set (optional - only for MoE models)
 oc apply -k gitops/operators/leader-worker-set
 ```
 
@@ -106,7 +144,7 @@ oc get csv -n openshift-operators | grep -q "servicemesh" && echo "OK" || echo "
 
 # Check Connectivity Link (RHOAI 3.0+)
 echo -n "Connectivity Link: "
-oc get csv -A | grep -q "connectivity-link\|kuadrant" && echo "OK" || echo "NOT FOUND (optional for 2.25)"
+oc get csv -n openshift-operators | grep -q "rhcl-operator" && echo "OK" || echo "NOT FOUND (required for RHOAI 3.0+)"
 
 # Check OpenShift AI
 echo -n "OpenShift AI: "
@@ -346,6 +384,7 @@ check "GPU nodes available" "oc get nodes -l nvidia.com/gpu.present=true | grep 
 # Operator checks
 check "Cert Manager installed" "oc get csv -A | grep -i cert-manager | grep -i succeeded"
 check "Service Mesh 3 installed" "oc get csv -n openshift-operators | grep -i servicemesh | grep -i succeeded"
+check "Connectivity Link installed" "oc get csv -n openshift-operators | grep rhcl-operator | grep -i succeeded"
 check "OpenShift AI installed" "oc get csv -A | grep -E 'rhods|openshift-ai' | grep -i succeeded"
 check "NVIDIA GPU Operator installed" "oc get csv -n nvidia-gpu-operator | grep gpu-operator | grep -i succeeded"
 
@@ -399,6 +438,50 @@ oc patch installplan <name> -n openshift-operators --type merge -p '{"spec":{"ap
 1. Verify NFD is labeling nodes correctly
 2. Check NVIDIA GPU Operator pods are running
 3. Verify GPU driver compatibility with OpenShift version
+
+### Connectivity Link Installation Issues
+
+**Symptom**: `rhcl-operator` CSV stuck in Pending or InstallPlan not progressing
+
+**Resolution**:
+```bash
+# Check for pending InstallPlans
+oc get installplan -n openshift-operators
+
+# Approve pending InstallPlan
+oc patch installplan <name> -n openshift-operators --type merge -p '{"spec":{"approved":true}}'
+
+# Verify all dependency CSVs are Succeeded
+oc get csv -n openshift-operators | grep -E "rhcl|authorino|limitador|dns"
+# Expected: All should show "Succeeded"
+```
+
+**Symptom**: "AuthPolicy CRD is not available" error in LLMInferenceService
+
+**Resolution**:
+1. Verify Connectivity Link is fully installed:
+   ```bash
+   oc get csv -n openshift-operators | grep rhcl-operator
+   # Should show "Succeeded"
+   ```
+
+2. Verify AuthPolicy CRD exists with correct version:
+   ```bash
+   oc get crd authpolicies.kuadrant.io
+   oc api-resources --api-group=kuadrant.io | grep authpolic
+   # Should show kuadrant.io/v1 (not v1beta2)
+   ```
+
+3. Restart the kserve controller to pick up the new CRD:
+   ```bash
+   oc delete pod -n redhat-ods-applications -l control-plane=kserve-controller-manager
+   oc wait --for=condition=ready pod -l control-plane=kserve-controller-manager \
+     -n redhat-ods-applications --timeout=120s
+   ```
+
+> **Important**: Use the official `rhcl-operator` from `redhat-operators` catalog.
+> Do NOT use the deprecated community `kuadrant-operator` from `community-operators` -
+> it provides incompatible CRD versions (v1beta2 vs v1) that RHOAI 3.0 cannot use.
 
 ## Next Steps
 

@@ -8,4 +8,4 @@ resources:
   - dsc.yaml
   - dsci.yaml
   - fix-kubeadmin.yaml
-  - odhdashboardconfig.yaml
+  # odhdashboardconfig.yaml - disabled since dashboard is not deployed
