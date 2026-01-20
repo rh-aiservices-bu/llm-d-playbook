@@ -389,6 +389,155 @@ spec:
           - pluginRef: max-score-picker
 ```
 
+## EndpointPicker Plugin Reference
+
+The EndpointPicker controls how the LLM-D scheduler routes requests to vLLM instances. Understanding these plugins is essential for optimizing routing behavior.
+
+### Default Configuration (RHOAI 2.25/3.0)
+
+If no `endpointPickerConfig` is provided, the default is:
+
+```yaml
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: single-profile-handler
+- type: prefix-cache-scorer
+- type: load-aware-scorer
+- type: max-score-picker
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: prefix-cache-scorer
+    weight: 2.0
+  - pluginRef: load-aware-scorer
+    weight: 1.0
+  - pluginRef: max-score-picker
+```
+
+> **Note**: In RHOAI 2.25/3.0, this default is static and not appropriate for P/D disaggregation. Future releases will dynamically configure based on `spec.prefill` presence.
+
+### Plugin Types
+
+Plugins follow a three-phase scheduling flow: **Filter → Score → Pick**
+
+#### Handlers
+
+Handlers determine which scheduling profile to use.
+
+| Plugin | Description | Use Case |
+|--------|-------------|----------|
+| `single-profile-handler` | Uses a single profile named `default` for all requests | Standard deployments without P/D |
+| `pd-profile-handler` | Selects `prefill` or `decode` profiles based on request | P/D disaggregation. Supports `threshold` config for small requests |
+| `prefill-header-handler` | Sets prefill profile based on request header | Advanced P/D routing |
+
+#### Filters
+
+Filters exclude endpoints that don't meet requirements.
+
+| Plugin | Description | Use Case |
+|--------|-------------|----------|
+| `prefill-filter` | Only allows prefill-capable endpoints | P/D disaggregation prefill profile |
+| `decode-filter` | Only allows decode-capable endpoints | P/D disaggregation decode profile |
+| `by-label-selector` | Filters pods using Kubernetes labels | Custom endpoint selection |
+
+#### Scorers
+
+Scorers rank eligible endpoints. Higher scores are preferred.
+
+| Plugin | Description | Use Case |
+|--------|-------------|----------|
+| `prefix-cache-scorer` | Scores based on prompt prefix cache presence | Multi-turn conversations, RAG |
+| `precise-prefix-cache-scorer` | Real-time KV-cache state tracking (more accurate) | High-throughput with strict SLOs |
+| `load-aware-scorer` | Scores based on current load metrics | Even load distribution |
+| `kv-cache-utilization-scorer` | Scores based on available KV cache capacity | Long-context workloads |
+| `queue-scorer` | Scores based on queue depth/wait time | Latency-sensitive workloads |
+| `active-request-scorer` | Scores based on active request count | Simple load balancing |
+| `session-affinity-scorer` | Scores based on session history | Stateful conversations |
+| `no-hit-lru-scorer` | LRU scoring for cache misses | Even cache distribution |
+| `lora-affinity-scorer` | Scores based on loaded LoRA adapters | Multi-adapter deployments |
+
+#### Pickers
+
+Pickers make the final endpoint selection.
+
+| Plugin | Description | Use Case |
+|--------|-------------|----------|
+| `max-score-picker` | Selects highest-scoring endpoint | Deterministic "best wins" |
+| `random-picker` | Random selection from eligible set | Testing, baseline comparison |
+| `weighted-random-picker` | Random selection weighted by scores | Softer optimization |
+
+### Known Issues
+
+#### kv-cache-utilization-scorer Bug (RHOAI 3.0/3.2)
+
+The `kv-cache-utilization-scorer` plugin requires a workaround due to incorrect default metric configuration ([RHOAIENG-41868](https://issues.redhat.com/browse/RHOAIENG-41868)):
+
+```yaml
+apiVersion: serving.kserve.io/v1alpha1
+kind: LLMInferenceService
+spec:
+  router:
+    scheduler:
+      template:
+        containers:
+          - name: scheduler
+            args:
+              - --kv-cache-usage-percentage-metric
+              - vllm:kv_cache_usage_perc
+```
+
+#### precise-prefix-cache-scorer in Disconnected Environments
+
+The `precise-prefix-cache-scorer` requires the scheduler to pull the tokenizer from HuggingFace, which may not work in disconnected environments.
+
+### Example: Intelligent Routing with KV Cache Awareness
+
+```yaml
+apiVersion: serving.kserve.io/v1alpha1
+kind: LLMInferenceService
+metadata:
+  name: my-model
+spec:
+  router:
+    scheduler:
+      template:
+        containers:
+          - name: scheduler
+            args:
+              - --kv-cache-usage-percentage-metric
+              - vllm:kv_cache_usage_perc
+      endpointPickerConfig: |
+        apiVersion: inference.networking.x-k8s.io/v1alpha1
+        kind: EndpointPickerConfig
+        plugins:
+        - type: single-profile-handler
+        - type: prefix-cache-scorer
+        - type: load-aware-scorer
+        - type: kv-cache-utilization-scorer
+        - type: max-score-picker
+        schedulingProfiles:
+        - name: default
+          plugins:
+          - pluginRef: prefix-cache-scorer
+            weight: 2.0
+          - pluginRef: load-aware-scorer
+            weight: 1.0
+          - pluginRef: kv-cache-utilization-scorer
+            weight: 1.5
+          - pluginRef: max-score-picker
+```
+
+For more details, see:
+- [Gateway API Inference Extension Configuration](https://gateway-api-inference-extension.sigs.k8s.io/guides/epp-configuration/config-text/)
+- [LLM-D Inference Scheduler Architecture](https://github.com/llm-d/llm-d-inference-scheduler/blob/main/docs/architecture.md)
+
+## High-Speed Networking (RoCE)
+
+For P/D disaggregation and multi-node deployments, high-speed networking is critical for KV cache transfer performance.
+
+> **Reference**: For detailed RoCE configuration on OpenShift, see the [(PSAP) Guide to RoCE on OCP for llm-d](https://docs.google.com/document/d/1ndHlQ8mgjbJ_45_rAbJPWwaGOCf4sOdjs4g300nceG0).
+
 ## Advanced vLLM Configuration
 
 ### Custom Probes for Large Models
@@ -480,7 +629,7 @@ metadata:
     security.opendatahub.io/enable-auth: 'false'
 ```
 
-> **Warning**: Auth is broken in RHOAI 3.0. If Connectivity Link is not installed, you must explicitly set `enable-auth: 'false'`.
+> **Warning**: Authentication is broken in RHOAI 3.0 ([RHOAIENG-39326](https://issues.redhat.com/browse/RHOAIENG-39326)) and should be resolved in 3.2. If Connectivity Link is not installed, you must explicitly set `enable-auth: 'false'`. If the annotation is omitted, it will attempt to use Connectivity Link and show errors.
 
 ## Dashboard Display Labels
 

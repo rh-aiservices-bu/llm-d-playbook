@@ -282,6 +282,13 @@ oc wait --for=condition=ready pod -l authorino-resource=authorino \
   -n kuadrant-system --timeout=150s
 ```
 
+> **Important**: If OpenShift AI was installed before setting up Red Hat Connectivity Link, you must restart the pods in `redhat-ods-applications` namespace for the auth configuration to take effect:
+> ```bash
+> oc delete pods --all -n redhat-ods-applications
+> oc wait --for=condition=ready pod -l control-plane=kserve-controller-manager \
+>   -n redhat-ods-applications --timeout=300s
+> ```
+
 ### Install OpenShift AI
 
 ```bash

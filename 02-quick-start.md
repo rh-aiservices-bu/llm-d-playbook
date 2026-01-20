@@ -170,7 +170,7 @@ curl -s -X POST http://${INFERENCE_URL}/demo-llm/gpt-oss-20b/v1/chat/completions
       {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user", "content": "Write a haiku about Kubernetes."}
     ]
-  }' | jq .choices[0].message.content
+  }' | jq '.choices[0].message.content'
 ```
 
 ## Step 6: Deploy Monitoring (Optional)

@@ -237,15 +237,18 @@ oc get dscinitializations -o yaml | grep -A5 "serviceMesh:"
 ### DataScienceCluster Check
 
 ```bash
-oc get datasciencecluster -o yaml | grep -A10 "kserve:"
+oc get datasciencecluster -o yaml | grep -A15 "kserve:"
 
 # Verify:
 # kserve:
 #   defaultDeploymentMode: RawDeployment
 #   managementState: Managed
+#   rawDeploymentServiceConfig: Headed
 #   serving:
 #     managementState: Removed
 ```
+
+> **Important**: The `rawDeploymentServiceConfig` setting defaults to `Headless` but **must be set to `Headed`** for proper load balancing. The `Headless` option is only intended for WatsonX integrations and will not properly load balance inference traffic. In RHOAI 3.x, this option is not shown in the default DSC and must be manually specified.
 
 ### Verify KServe Configuration
 
