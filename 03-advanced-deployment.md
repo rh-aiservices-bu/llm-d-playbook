@@ -12,6 +12,8 @@ LLM-D requires the Gateway API which recommends `Service` objects with `type: Lo
 
 > **Note**: While it's possible to use `type: ClusterIP` with manual exposure methods, this is not recommended and would require a Support Exception.
 
+> **Coming Soon**: OpenShift Route capability for bare metal users is planned for RHOAI 3.2 ([RHOAIENG-41558](https://issues.redhat.com/browse/RHOAIENG-41558)).
+
 ### Installing MetalLB Operator
 
 ```bash
@@ -577,6 +579,14 @@ spec:
             value: "--disable-uvicorn-access-log --max-model-len=32768"
 ```
 
+> **Warning**: When applying additional args through the RHOAI Dashboard UI, they will be incorrectly added to the `args` section instead of `VLLM_ADDITIONAL_ARGS`, which will break the model server. Always use YAML manifests directly for custom vLLM arguments.
+
+### Replica Scaling
+
+LLM-D does not currently support autoscaling vLLM replicas. Manual replica counts are specified via `spec.replicas` and `spec.prefill.replicas`.
+
+> **Coming Soon**: Autoscaling support is planned for RHOAI 3.4.
+
 ### Multi-GPU with Tensor Parallelism
 
 ```yaml
@@ -630,6 +640,10 @@ metadata:
 ```
 
 > **Warning**: Authentication is broken in RHOAI 3.0 ([RHOAIENG-39326](https://issues.redhat.com/browse/RHOAIENG-39326)) and should be resolved in 3.2. If Connectivity Link is not installed, you must explicitly set `enable-auth: 'false'`. If the annotation is omitted, it will attempt to use Connectivity Link and show errors.
+
+### External Exposure Limitation
+
+Currently, there is no way to prevent an LLMInferenceService from being exposed outside the cluster. All models deployed via LLMInferenceService will be accessible through the Gateway. Use authentication (`enable-auth: 'true'`) and network policies to control access.
 
 ## Dashboard Display Labels
 

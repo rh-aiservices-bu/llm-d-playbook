@@ -49,7 +49,7 @@ mirror:
         - name: openshift-cert-manager-operator
           channels:
             - name: stable
-        - name: connectivity-link-operator
+        - name: rhcl-operator
           channels:
             - name: stable
         - name: nfd
@@ -199,11 +199,11 @@ oc apply -f - <<EOF
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
 metadata:
-  name: connectivity-link-operator
+  name: rhcl-operator
   namespace: openshift-operators
 spec:
   channel: stable
-  name: connectivity-link-operator
+  name: rhcl-operator
   source: redhat-operators
   sourceNamespace: openshift-marketplace
 EOF
@@ -217,11 +217,11 @@ For disconnected environments, update the Connectivity Link subscription to incl
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
 metadata:
-  name: connectivity-link-operator
+  name: rhcl-operator
   namespace: openshift-operators
 spec:
   channel: stable
-  name: connectivity-link-operator
+  name: rhcl-operator
   source: redhat-operators
   sourceNamespace: openshift-marketplace
   config:
