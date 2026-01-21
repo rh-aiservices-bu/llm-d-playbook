@@ -56,11 +56,29 @@ oc get pods -n nvidia-gpu-operator
 # nvidia-operator-validator-xxxxx                       1/1     Running     ...
 ```
 
+
+
 ## Install Required Operators
 
 If operators are missing, install them from the included `gitops/operators/` directory.
 
-### Install Order
+### Option 1 Quick Install (OCP 4.19+)
+
+For a quick install of all prerequisites on OCP 4.19 or later:
+
+```bash
+# Install all OCP 4.19+ prerequisites at once
+# This installs: Cert Manager, Service Mesh 3, Connectivity Link, RHOAI
+# The retry loop handles dependency ordering automatically
+until oc apply -k gitops/ocp-4.19; do : ; done
+
+# Watch operator installation progress
+oc get csv -A -w
+```
+
+> **Note**: This also works for OCP 4.20. The retry loop ensures operators install in the correct order as CRDs become available.
+
+### Option 2 Individual operator installation
 
 Install operators in this order to satisfy dependencies:
 
@@ -111,18 +129,6 @@ oc wait --for=condition=ready pod -l control-plane=kserve-controller-manager -n 
 
 # 9. Leader Worker Set (optional - only for MoE models)
 oc apply -k gitops/operators/leader-worker-set
-```
-
-### Quick Install (OCP 4.19)
-
-For a quick install of all prerequisites on OCP 4.19:
-
-```bash
-# Install all OCP 4.19 prerequisites at once
-until oc apply -k gitops/ocp-4.19; do : ; done
-
-# Watch operator installation progress
-oc get csv -A -w
 ```
 
 ## Required Operators Checklist

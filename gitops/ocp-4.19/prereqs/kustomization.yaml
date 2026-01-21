@@ -1,7 +1,14 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# Install order (handled by retry loop: until oc apply -k ...; do : ; done):
+# 1. Cert Manager (dependency for others)
+# 2. Service Mesh 3 (dependency for Connectivity Link)
+# 3. Connectivity Link (dependency for RHOAI 3.0+)
+# 4. RHOAI
+
 resources:
+  - ../../operators/cert-manager
+  - ../../operators/servicemeshoperator3/operator/overlays/stable
+  - ../../operators/connectivity-link
   - ../../operators/rhoai
-  # service mesh 3 is installed by the rhoai operator
-  # - ../../operators/servicemeshoperator3/operator/overlays/stable
