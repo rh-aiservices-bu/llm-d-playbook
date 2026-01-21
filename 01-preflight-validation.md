@@ -133,36 +133,16 @@ oc apply -k gitops/operators/leader-worker-set
 
 ## Required Operators Checklist
 
-Run this script to check all required operators:
+Run the included script to check all required operators:
 
 ```bash
-#!/bin/bash
+./scripts/check-operators.sh
+```
 
-echo "=== Checking Required Operators ==="
+Or run manually:
 
-# Check Cert Manager
-echo -n "Cert Manager: "
-oc get csv -A | grep -q "cert-manager" && echo "OK" || echo "MISSING"
-
-# Check Service Mesh 3
-echo -n "Service Mesh 3: "
-oc get csv -n openshift-operators | grep -q "servicemesh" && echo "OK" || echo "MISSING"
-
-# Check Connectivity Link (RHOAI 3.0+)
-echo -n "Connectivity Link: "
-oc get csv -n openshift-operators | grep -q "rhcl-operator" && echo "OK" || echo "NOT FOUND (required for RHOAI 3.0+)"
-
-# Check OpenShift AI
-echo -n "OpenShift AI: "
-oc get csv -n redhat-ods-operator | grep -q "rhods\|openshift-ai" && echo "OK" || echo "MISSING"
-
-# Check NFD
-echo -n "Node Feature Discovery: "
-oc get csv -A | grep -q "nfd" && echo "OK" || echo "MISSING"
-
-# Check NVIDIA GPU Operator
-echo -n "NVIDIA GPU Operator: "
-oc get csv -n nvidia-gpu-operator | grep -q "gpu-operator" && echo "OK" || echo "MISSING"
+```bash
+oc get csv -A | grep -E "cert-manager|servicemesh|rhcl|rhods|nfd|gpu-operator"
 ```
 
 ## Bare Metal Validation (Optional)
@@ -271,9 +251,11 @@ oc get llminferenceserviceconfigs -n redhat-ods-applications
 ### Test Internal Service Resolution
 
 ```bash
-# Create a test pod
-oc run test-dns --rm -it --restart=Never --image=registry.access.redhat.com/ubi9/ubi-minimal -- \
-  nslookup openshift-ai-inference-openshift-default.openshift-ingress.svc.cluster.local
+# Create a test pod to verify DNS resolution
+oc run test-dns --rm -it --restart=Never --image=registry.access.redhat.com/ubi9/ubi -- \
+  getent hosts openshift-ai-inference-openshift-default.openshift-ingress.svc.cluster.local
+
+# Expected output: <IP>  openshift-ai-inference-openshift-default.openshift-ingress.svc.cluster.local
 ```
 
 ### Validate Gateway Connectivity
@@ -363,57 +345,19 @@ oc delete pod gpu-test -n default
 
 ## Pre-flight Summary Script
 
-Run this comprehensive validation script:
+Run the comprehensive validation script:
 
 ```bash
-#!/bin/bash
-
-echo "=========================================="
-echo "LLM-D Pre-flight Validation"
-echo "=========================================="
-
-PASS=0
-FAIL=0
-
-check() {
-  if eval "$2" > /dev/null 2>&1; then
-    echo "[PASS] $1"
-    ((PASS++))
-  else
-    echo "[FAIL] $1"
-    ((FAIL++))
-  fi
-}
-
-# Core checks
-check "OpenShift 4.19+" "oc version | grep -E 'Server Version: 4\.(19|[2-9][0-9])'"
-check "Cluster admin access" "oc auth can-i '*' '*' --all-namespaces"
-check "GPU nodes available" "oc get nodes -l nvidia.com/gpu.present=true | grep -v NAME"
-
-# Operator checks
-check "Cert Manager installed" "oc get csv -A | grep -i cert-manager | grep -i succeeded"
-check "Service Mesh 3 installed" "oc get csv -n openshift-operators | grep -i servicemesh | grep -i succeeded"
-check "Connectivity Link installed" "oc get csv -n openshift-operators | grep rhcl-operator | grep -i succeeded"
-check "OpenShift AI installed" "oc get csv -A | grep -E 'rhods|openshift-ai' | grep -i succeeded"
-check "NVIDIA GPU Operator installed" "oc get csv -n nvidia-gpu-operator | grep gpu-operator | grep -i succeeded"
-
-# Gateway checks
-check "GatewayClass exists" "oc get gatewayclass openshift-default"
-check "AI Inference Gateway exists" "oc get gateway openshift-ai-inference -n openshift-ingress"
-
-# Configuration checks
-check "KServe in RawDeployment mode" "oc get datasciencecluster -o yaml | grep -A5 kserve | grep RawDeployment"
-
-echo ""
-echo "=========================================="
-echo "Results: $PASS passed, $FAIL failed"
-echo "=========================================="
-
-if [ $FAIL -gt 0 ]; then
-  echo "Please resolve failed checks before proceeding."
-  exit 1
-fi
+./scripts/preflight-validation.sh
 ```
+
+This checks:
+- OpenShift version (4.19+)
+- Cluster admin access
+- GPU node availability
+- All required operators (Cert Manager, Service Mesh 3, Connectivity Link, RHOAI, GPU Operator)
+- Gateway configuration
+- KServe RawDeployment mode
 
 ## Common Pre-flight Issues
 
