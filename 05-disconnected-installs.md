@@ -38,11 +38,12 @@ storageConfig:
     path: ./oc-mirror
 mirror:
   operators:
-    - catalog: registry.redhat.io/redhat/redhat-operator-index:v4.19
+    # Update catalog version to match your OCP version (v4.19, v4.20, etc.)
+    - catalog: registry.redhat.io/redhat/redhat-operator-index:v4.20
       packages:
         - name: rhods-operator
           channels:
-            - name: stable
+            - name: fast-3.x
         - name: servicemeshoperator3
           channels:
             - name: stable
@@ -59,11 +60,22 @@ mirror:
           channels:
             - name: stable
   additionalImages:
-    # vLLM image
-    - name: registry.redhat.io/rhoai/vllm-openai-rhel9:latest
+    # LLM-D images (RHOAI 3.0+)
+    # Note: Get exact digests from your LLMInferenceServiceConfig:
+    #   oc get llminferenceserviceconfig -n redhat-ods-applications -o yaml | grep image:
+
+    # vLLM image (note: rhaiis registry, not rhoai)
+    - name: registry.redhat.io/rhaiis/vllm-cuda-rhel9@sha256:ad756c01ec99a99cc7d93401c41b8d92ca96fb1ab7c5262919d818f2be4f3768
     # Scheduler image
-    - name: registry.redhat.io/rhoai/llm-d-inference-scheduler-rhel9:latest
+    - name: registry.redhat.io/rhoai/odh-llm-d-inference-scheduler-rhel9@sha256:70e900e40845e82ef9ff4ac888afa6a6e835b019ad69aae7297d111e087520a3
+    # Routing sidecar image
+    - name: registry.redhat.io/rhoai/odh-llm-d-routing-sidecar-rhel9@sha256:e45e6925ad930d9195d906fc922cb956621c98533cc9ad1916c510e8a79c0904
 ```
+
+> **Important**: The image digests above are from RHOAI 3.0. Always verify current digests by running:
+> ```bash
+> oc get llminferenceserviceconfig -n redhat-ods-applications -o yaml | grep -E "image:" | sort -u
+> ```
 
 ## Step 2: Mirror Images
 
