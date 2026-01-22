@@ -110,6 +110,25 @@ oc get svc -n openshift-ingress | grep openshift-ai-inference
 
 ## Custom Gateway Configuration
 
+### HTTPRoute Hijacking Threat Model
+
+When a Gateway is configured with `allowedRoutes.namespaces.from: All`, any namespace can create HTTPRoutes that attach to the Gateway. This creates a security risk:
+
+**How the Attack Works:**
+1. LLM-D automatically creates HTTPRoutes using the `/<namespace>/<service>` prefix convention
+2. An attacker in a different namespace can create their own HTTPRoute with the same prefix
+3. The HTTPRoute created **first** generally takes precedence for routing
+4. Alternatively, **more specific prefixes take precedence** even if created later - so an HTTPRoute with `/<namespace>/<service>/v1` will override `/<namespace>/<service>`
+
+**Example Attack:**
+- Legitimate service: `demo-llm/my-model` creates HTTPRoute with prefix `/demo-llm/my-model`
+- Attacker in `evil-ns` creates HTTPRoute with prefix `/demo-llm/my-model/v1/chat/completions`
+- All chat completion requests now route to the attacker's endpoint
+
+**Mitigations:**
+1. **Limit AllowedRoutes** (recommended) - Restrict which namespaces can use the Gateway
+2. **Per-Namespace Gateways** - Create separate Gateway instances for each tenant
+
 ### Basic Gateway with Namespace Restrictions
 
 Restrict which namespaces can use the Gateway to prevent HTTPRoute hijacking:
@@ -542,6 +561,45 @@ For P/D disaggregation and multi-node deployments, high-speed networking is crit
 
 ## Advanced vLLM Configuration
 
+### Template List Merge vs Replace Behavior
+
+> **Critical**: When customizing `spec.template`, some fields are **additive** (merged with defaults) while others **completely replace** the defaults. Misunderstanding this can break your deployment.
+
+The `spec.template` section overrides values from the `kserve-config-llm-template` LLMInferenceServiceConfig in the `redhat-ods-applications` namespace.
+
+**Additive (Merged) Fields:**
+- `env` - Environment variables are merged; your vars are added to defaults
+- `volumes` and `volumeMounts` - Added to existing mounts
+
+**Replacement Fields:**
+- `args` - Completely replaces the default entrypoint arguments
+- `command` - Completely replaces the default command
+
+**Why `VLLM_ADDITIONAL_ARGS` Exists:**
+
+Because `args` is a replacement field, you cannot simply add arguments to the vLLM command line via `spec.template.containers[].args` - doing so would replace all default arguments and break the startup.
+
+Instead, use the `VLLM_ADDITIONAL_ARGS` environment variable, which is read by the entrypoint script and appended to the default arguments:
+
+```yaml
+# ✅ CORRECT - Use env var
+spec:
+  template:
+    containers:
+      - name: main
+        env:
+          - name: VLLM_ADDITIONAL_ARGS
+            value: "--disable-uvicorn-access-log --max-model-len=32768"
+
+# ❌ WRONG - This replaces ALL default args
+spec:
+  template:
+    containers:
+      - name: main
+        args:
+          - "--max-model-len=32768"  # Breaks startup!
+```
+
 ### Custom Probes for Large Models
 
 Large models may require extended startup times:
@@ -644,6 +702,29 @@ metadata:
 ### External Exposure Limitation
 
 Currently, there is no way to prevent an LLMInferenceService from being exposed outside the cluster. All models deployed via LLMInferenceService will be accessible through the Gateway. Use authentication (`enable-auth: 'true'`) and network policies to control access.
+
+## Magic Annotations and Labels
+
+> **Warning**: KServe and OpenShift AI use "magic" annotations and labels that change deployment behavior. These are often undocumented and can cause unexpected results if set incorrectly.
+
+**Known Magic Annotations:**
+
+| Annotation | Effect |
+|------------|--------|
+| `security.opendatahub.io/enable-auth` | Enables/disables Connectivity Link authentication |
+| `opendatahub.io/hardware-profile-name` | Links to a hardware profile for resource defaults |
+| `opendatahub.io/hardware-profile-namespace` | Namespace of the hardware profile |
+| `opendatahub.io/model-type` | Model type classification (e.g., `generative`) |
+| `k8s.v1.cni.cncf.io/networks` | Attaches secondary networks (e.g., RoCE) |
+
+**Known Magic Labels:**
+
+| Label | Effect |
+|-------|--------|
+| `opendatahub.io/dashboard` | Makes the model visible in RHOAI Dashboard |
+| `opendatahub.io/genai-asset` | Marks as a GenAI asset |
+
+When troubleshooting unexpected behavior, check for these annotations/labels - they may be modifying defaults in non-obvious ways.
 
 ## Dashboard Display Labels
 
