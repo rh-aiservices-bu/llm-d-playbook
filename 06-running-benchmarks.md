@@ -406,11 +406,77 @@ First Turn vs Subsequent Turns (Prefix Caching):
 | `--model` | Model name for tokenizer | `Qwen/Qwen3-4B` |
 | `--processor` | Processor name (optional) | `Qwen/Qwen3-4B` |
 | `--data` | Data file or inline JSON | `prompts.csv` or `{"prompt_tokens":1000}` |
-| `--rate-type` | `concurrent` or `constant` | `concurrent` |
-| `--rate` | Concurrency or RPS | `1,2,4,8,16` |
+| `--rate-type` | `concurrent`, `constant`, or `sweep` | `concurrent` |
+| `--rate` | Concurrency or RPS (comma-separated for multiple) | `1,2,4,8,16` |
 | `--max-seconds` | Benchmark duration | `300` |
 | `--max-requests` | Maximum requests | `1000` |
 | `--output-path` | Results file path | `results.json` |
+
+### Rate Type Options
+
+| Rate Type | Behavior | Use Case |
+|-----------|----------|----------|
+| `concurrent` | Fixed number of concurrent requests | Controlled A/B comparisons |
+| `constant` | Fixed requests per second | Testing specific throughput targets |
+| `sweep` | Automatically discovers throughput limits | Capacity planning |
+
+### Warning: Sweep Mode (`--rate-type sweep`)
+
+> **Warning**: Sweep mode is designed to find the saturation limit of a model deployment. It will automatically probe to discover the upper throughput boundary, then run benchmarks to characterize performance.
+
+**How Sweep Mode Works:**
+
+1. GuideLLM probes the system to identify its maximum sustainable throughput
+2. It then runs benchmarks at various points up to that discovered limit
+3. The discovered limit will likely differ between systems (e.g., vLLM vs LLM-D)
+
+**Why This Can Be Misleading for A/B Comparisons:**
+
+Because sweep mode discovers each system's limit independently, comparing sweep results between vLLM and LLM-D may not be an apples-to-apples comparison - each system will be tested at different effective concurrency levels based on their respective saturation points.
+
+**Recommendations:**
+
+- **For A/B comparisons** (vLLM vs LLM-D): Use `--rate-type concurrent` with explicit, identical rate values
+  ```bash
+  # Same fixed concurrency for both systems
+  --rate-type concurrent --rate '1,2,4,8,16'
+  ```
+
+- **For capacity planning**: Sweep mode is appropriate when you want to understand a single system's limits
+  ```bash
+  --rate-type sweep
+  ```
+
+- **For production baselines**: Test at your expected production load, not at saturation
+
+## Exporting Results to Different Formats
+
+GuideLLM saves results as JSON by default. You can re-export to other formats using `benchmark from-file`:
+
+```bash
+# Re-export JSON results to console, CSV, and HTML
+podman run -it --rm \
+    --user 0:0 \
+    --volume ./results:/results:z \
+    ghcr.io/vllm-project/guidellm:v0.5.2 \
+    benchmark from-file \
+        --output-path /results \
+        --output-formats console \
+        --output-formats output.csv \
+        --output-formats output.html \
+        /results/output.json
+```
+
+**Available Output Formats:**
+
+| Format | Description | Use Case |
+|--------|-------------|----------|
+| `console` | Text summary to stdout | Quick troubleshooting, logs |
+| `*.csv` | Comma-separated values | Spreadsheet analysis, data processing |
+| `*.html` | Interactive HTML report | Sharing results, documentation |
+| `*.json` | Full JSON output | Programmatic analysis, archival |
+
+> **Tip**: The console format is usually sufficient for troubleshooting. Use CSV/HTML when you need to share results or do deeper analysis.
 
 ## Disconnected Environment Notes
 
